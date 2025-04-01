@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+
+	// "errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -18,7 +21,12 @@ type Server struct {
 	ResponseTime int    `json:"responseTime"`
 }
 
-const SERVER_FILE = "server.json"
+type RequestInfo struct {
+	StatusCode   int `json:"statusCode"`
+	ResponseTime int64 `json:"responseTime"`
+}
+
+const SERVER_FILE = "servers.json"
 const PERM_CODE = 0600
 
 const QUIT = "q"
@@ -28,35 +36,56 @@ const DELETE = "del"
 
 var gFile *os.File
 
-func madeRequest() {
-	// startTime := time.Now()
-	resp, err := http.Get("https://aiostudy.com")
+func madeRequest(uri string) (RequestInfo, error) {
+	startTime := time.Now()
+	resp, err := http.Get(uri)
 
 	if err != nil {
-		fmt.Println(err.Error())
-		return
+		if errors.Is(err, http.ErrNotSupported) {
+			fmt.Println("Ошибка. это не поддерживается")
+		}
+
+		return RequestInfo{}, err
 	}
 
 	defer resp.Body.Close()
 
-	// resp.StatusCode
-	// time.Since(startTime).Milliseconds()
+	return RequestInfo{
+		StatusCode: resp.StatusCode,
+		ResponseTime: time.Since(startTime).Milliseconds(),
+	}, nil
 }
 
 func checkout() {
-	data, err := os.ReadFile(SERVER_FILE)
+	servers := []string{}
 
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("No servers for checking...")
-		} else {
-			fmt.Println("Unknown file reading error...")
+	if err := json.NewDecoder(gFile).Decode(&servers); err != nil {
+		if err != io.EOF {
+			fmt.Println(err.Error())
+			return
 		}
+	}
 
+	if len(servers) == 0 {
+		fmt.Println("No servers for checking...")
 		return
 	}
 
-	fmt.Println(data)
+	for _, server := range servers {
+		info, err := madeRequest(server)
+
+		if err != nil {
+			fmt.Println(err.Error())
+			continue
+		}
+
+		fmt.Println("status code:", info.StatusCode)
+		fmt.Println("response time:", info.ResponseTime)
+	}
+
+	if _, err := gFile.Seek(0, 0); err != nil {
+		fmt.Println("Can't move pointer")
+	}
 }
 
 func clearFile() error {
@@ -72,7 +101,7 @@ func clearFile() error {
 }
 
 func addServerForChecking(serverName string) {
-	servers := []Server{}
+	servers := []string{}
 
 	if _, err := gFile.Seek(0, 0); err != nil {
 		fmt.Println("Can't move pointer")
@@ -86,14 +115,14 @@ func addServerForChecking(serverName string) {
 		}
 	}
 
-	fmt.Println(servers)
-
-	newServer := Server{
-		Uri: serverName,
+	for _, server := range servers {
+		if server == serverName {
+			fmt.Println("Server already exists...")
+			return
+		}
 	}
 
-	servers = append(servers, newServer)
-
+	servers = append(servers, serverName)
 	data, err := json.Marshal(servers)
 
 	if err != nil {
@@ -107,7 +136,7 @@ func addServerForChecking(serverName string) {
 	}
 
 	if _, err := gFile.Write(data); err != nil {
-		fmt.Println("Ошибка записи в файл")
+		fmt.Println("Can't write to file")
 		return
 	}
 
@@ -115,7 +144,7 @@ func addServerForChecking(serverName string) {
 }
 
 func removeServer(serverName string) {
-	servers := []Server{}
+	servers := []string{}
 
 	if _, err := gFile.Seek(0, 0); err != nil {
 		fmt.Println("Can't move pointer")
@@ -130,7 +159,7 @@ func removeServer(serverName string) {
 	}
 
 	for i, server := range servers {
-		if server.Uri == serverName {
+		if server == serverName {
 			servers = append(servers[:i], servers[i+1:]...)
 			break
 		}
@@ -149,7 +178,7 @@ func removeServer(serverName string) {
 	}
 
 	if _, err := gFile.Write(data); err != nil {
-		fmt.Println("Не удалось записать файл")
+		fmt.Println("Can't write to file")
 		return
 	}
 
@@ -206,14 +235,14 @@ func main() {
 	go func() {
 		defer wg.Done()
 
-		// for {
-		// 	fmt.Println("Checking...")
+		for {
+			fmt.Println("Checking...")
 
-		// 	checkout()
+			checkout()
 
-		// 	timer := time.NewTimer(time.Duration(5 * time.Second))
-		// 	<-timer.C
-		// }
+			timer := time.NewTimer(time.Duration(5 * time.Second))
+			<-timer.C
+		}
 	}()
 
 	wg.Wait()
