@@ -13,9 +13,9 @@ import (
 )
 
 type Server struct {
-	Uri string `json:"uri"`
-	StatusCode int `json:"statusCode"`
-	ResponseTime int `json:"responseTime"`
+	Uri          string `json:"uri"`
+	StatusCode   int    `json:"statusCode"`
+	ResponseTime int    `json:"responseTime"`
 }
 
 const SERVER_FILE = "server.json"
@@ -78,7 +78,7 @@ func addServerForChecking(serverName string) {
 		fmt.Println("Can't move pointer")
 		return
 	}
-	
+
 	if err := json.NewDecoder(gFile).Decode(&servers); err != nil {
 		if err != io.EOF {
 			fmt.Println(err.Error())
