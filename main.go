@@ -3,13 +3,12 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
-
-	// "errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,8 +21,10 @@ type Server struct {
 }
 
 type RequestInfo struct {
-	StatusCode   int `json:"statusCode"`
-	ResponseTime int64 `json:"responseTime"`
+	Uri          string `json:"uri"`
+	StatusCode   int    `json:"statusCode"`
+	ResponseTime int64  `json:"responseTime"`
+	Message      string `json:"message"`
 }
 
 const SERVER_FILE = "servers.json"
@@ -36,24 +37,30 @@ const DELETE = "del"
 
 var gFile *os.File
 
-func madeRequest(uri string) (RequestInfo, error) {
+func madeRequest(uri string) RequestInfo {
 	startTime := time.Now()
 	resp, err := http.Get(uri)
 
 	if err != nil {
-		if errors.Is(err, http.ErrNotSupported) {
-			fmt.Println("Ошибка. это не поддерживается")
+		info := RequestInfo{}
+		info.Uri = uri
+
+		if _, ok := err.(*url.Error); ok {
+			info.Message = "Invalid url"
+		} else {
+			info.Message = "Unknow error"
 		}
 
-		return RequestInfo{}, err
+		return info
 	}
 
 	defer resp.Body.Close()
 
 	return RequestInfo{
-		StatusCode: resp.StatusCode,
+		Uri:          uri,
+		StatusCode:   resp.StatusCode,
 		ResponseTime: time.Since(startTime).Milliseconds(),
-	}, nil
+	}
 }
 
 func checkout() {
@@ -71,16 +78,38 @@ func checkout() {
 		return
 	}
 
+	servsersInfo := []RequestInfo{}
+
 	for _, server := range servers {
-		info, err := madeRequest(server)
+		info := madeRequest(server)
+		servsersInfo = append(servsersInfo, info)
+	}
 
-		if err != nil {
-			fmt.Println(err.Error())
-			continue
+	dateNow := time.Now()
+	newPath := filepath.Join(".", "logs", dateNow.Format(time.DateOnly))
+
+	if _, err := os.Stat(newPath); err != nil {
+		if err := os.MkdirAll(newPath, PERM_CODE); err != nil {
+			fmt.Println(err.Error(), "Can't create folder")
+			return
 		}
+	}
 
-		fmt.Println("status code:", info.StatusCode)
-		fmt.Println("response time:", info.ResponseTime)
+	fileName := fmt.Sprintf("%s.json", dateNow.Format("15-04-05"))
+	file, err := os.OpenFile(filepath.Join(newPath, fileName), os.O_CREATE|os.O_WRONLY, PERM_CODE)
+
+	if err != nil {
+		fmt.Println("Can't create file...")
+		return
+	}
+
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "\t")
+
+	if err := encoder.Encode(servsersInfo); err != nil {
+		fmt.Println("Can't write to file...")
 	}
 
 	if _, err := gFile.Seek(0, 0); err != nil {
